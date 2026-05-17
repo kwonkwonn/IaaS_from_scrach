@@ -74,10 +74,11 @@ setup_ns_internals() {
     done
 
     ip netns exec "$ns" sysctl -qw net.ipv4.ip_forward=1
+    ip netns exec "$ns" sysctl -qw "net.ipv4.conf.${veth_ns}.proxy_arp=1"
     ip netns exec "$ns" ip route add default via "$veth_host_ip"
 
-    # outbound NAT: VM traffic leaving namespace toward host
-    ip netns exec "$ns" iptables -t nat -A POSTROUTING -o "$veth_ns" -j MASQUERADE
+    # outbound NAT: VM traffic leaving namespace — skip host-side veth to preserve source IP on return path
+    ip netns exec "$ns" iptables -t nat -A POSTROUTING -o "$veth_ns" ! -d "${veth_host_ip}" -j MASQUERADE
 }
 
 # ----------------------------------------------------------------------------
