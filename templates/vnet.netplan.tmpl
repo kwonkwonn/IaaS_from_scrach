@@ -1,0 +1,18 @@
+network:
+  version: 2
+  renderer: networkd
+
+  ethernets:
+    # host-side veth for vnet-a (peer lives inside namespace)
+    __VETH_A_HOST__:
+      dhcp4: no
+      link-local: []
+      addresses:
+        - __VETH_A_HOST_IP__/__VETH_PREFIX__
+
+    # host-side veth for vnet-b (peer lives inside namespace)
+    __VETH_B_HOST__:
+      dhcp4: no
+      link-local: []
+      addresses:
+        - __VETH_B_HOST_IP__/__VETH_PREFIX__
