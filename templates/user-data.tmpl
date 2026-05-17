@@ -1,0 +1,19 @@
+#cloud-config
+hostname: __VM_NAME__
+
+users:
+  - name: ubuntu
+    plain_text_passwd: ubuntu
+    lock_passwd: false
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+
+ssh_pwauth: true
+chpasswd:
+  expire: false
+
+# grow root partition to fill disk on first boot
+growpart:
+  mode: auto
+  devices: [/]
+resize_rootfs: true

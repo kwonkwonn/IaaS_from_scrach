@@ -26,7 +26,8 @@ apt-get install -y \
     iptables \
     cloud-image-utils \
     ovmf \
-    wget
+    wget \
+    sshpass
 
 # ── microceph (snap) ─────────────────────────────────────────────────────────
 
@@ -49,5 +50,15 @@ modprobe tun
 # ── runtime directories ──────────────────────────────────────────────────────
 
 mkdir -p "$VM_PIDDIR" "$VM_LOGDIR" "$CLOUD_INIT_DIR"
+
+# ── cloud image ───────────────────────────────────────────────────────────────
+
+# NOTE: ~600 MB download, takes a few minutes
+if [[ ! -f "$CLOUD_IMAGE_FILE" ]]; then
+    echo "[prereq] downloading cloud image ..."
+    wget -q --show-progress -O "$CLOUD_IMAGE_FILE" "$CLOUD_IMAGE_URL"
+else
+    echo "[prereq] cloud image already present — skipping"
+fi
 
 echo "[prereq] done"

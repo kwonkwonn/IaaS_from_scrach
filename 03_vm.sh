@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ----------------------------------------------------------------------------
+# variables
+# ----------------------------------------------------------------------------
+
+VM1_NAME=${VM1_NAME:-vm1}
+VM2_NAME=${VM2_NAME:-vm2}
+VM3_NAME=${VM3_NAME:-vm3}
+
+VM1_IP=${VM1_IP:-192.168.0.1}
+VM2_IP=${VM2_IP:-192.168.0.2}
+VM3_IP=${VM3_IP:-192.168.0.3}
+VM_GW=${VM_GW:-192.168.0.254}
+VM_PREFIX=${VM_PREFIX:-24}
+
+TAP_VM1=${TAP_VM1:-tap-vm1}
+TAP_VM2=${TAP_VM2:-tap-vm2}
+TAP_VM3=${TAP_VM3:-tap-vm3}
+
+VM1_MAC=${VM1_MAC:-52:54:00:00:00:01}
+VM2_MAC=${VM2_MAC:-52:54:00:00:00:02}
+VM3_MAC=${VM3_MAC:-52:54:00:00:00:03}
+
+VNET_A_NS=${VNET_A_NS:-vnet-a}
+VNET_B_NS=${VNET_B_NS:-vnet-b}
+
+VM_RAM_MB=${VM_RAM_MB:-2048}
+VM_CPUS=${VM_CPUS:-1}
+
+VM1_VNC_PORT=${VM1_VNC_PORT:-5901}
+VM2_VNC_PORT=${VM2_VNC_PORT:-5902}
+VM3_VNC_PORT=${VM3_VNC_PORT:-5903}
+
+CLOUD_IMAGE_URL=${CLOUD_IMAGE_URL:-https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img}
+CLOUD_IMAGE_FILE=${CLOUD_IMAGE_FILE:-/tmp/noble-cloudimg.img}
+
+CLOUD_INIT_DIR=${CLOUD_INIT_DIR:-/tmp/cloud-init}
+VM_PIDDIR=${VM_PIDDIR:-/run/vms}
+VM_LOGDIR=${VM_LOGDIR:-/var/log/vms}
+
+TMPL_DIR="$(dirname "$0")/templates"
+
+# ----------------------------------------------------------------------------
+# functions
+# ----------------------------------------------------------------------------
+
+# render_tmpl <template> <key=value> ...
+#   substitutes __KEY__ placeholders via sed
+render_tmpl() {
+    local tmpl=$1; shift
+    local content
+    content=$(cat "$tmpl")
+    for pair in "$@"; do
+        local key="${pair%%=*}"
+        local val="${pair#*=}"
+        content=$(echo "$content" | sed "s|__${key}__|${val}|g")
+    done
+    echo "$content"
+}
+
+# install_image <block-dev>
+#   writes cloud image to block device (skips if partition table already present)
+install_image() {
+    local dev=$1
+    if fdisk -l "$dev" 2>/dev/null | grep -q "Linux"; then
+        echo "[vm] $dev already has a partition table — skipping image write"
+        return
+    fi
+    echo "[vm] writing cloud image to $dev ..."
+    qemu-img convert -f qcow2 -O raw "$CLOUD_IMAGE_FILE" "$dev"
+}
+
+# make_seed <vm-name> <vm-ip> <vm-mac>
+#   creates cloud-init seed ISO for a VM
+make_seed() {
+    local name=$1 ip=$2 mac=$3
+    local dir="${CLOUD_INIT_DIR}/${name}"
+    mkdir -p "$dir"
+
+    render_tmpl "${TMPL_DIR}/user-data.tmpl"       "VM_NAME=${name}" \
+        > "${dir}/user-data"
+
+    render_tmpl "${TMPL_DIR}/meta-data.tmpl"       "VM_NAME=${name}" \
+        > "${dir}/meta-data"
+
+    render_tmpl "${TMPL_DIR}/network-config.tmpl"  \
+        "VM_IP=${ip}" "VM_PREFIX=${VM_PREFIX}" "VM_GW=${VM_GW}" "VM_MAC=${mac}" \
+        > "${dir}/network-config"
+
+    cloud-localds --network-config="${dir}/network-config" \
+        "${dir}/seed.iso" "${dir}/user-data" "${dir}/meta-data"
+
+    echo "[vm] seed ISO ready: ${dir}/seed.iso"
+}
+
+# launch_vm <vm-name> <ns> <tap> <vnc-port> <mac>
+#   runs QEMU inside the given network namespace
+launch_vm() {
+    local name=$1 ns=$2 tap=$3 vnc_port=$4 mac=$5
+    local dev
+    dev=$(cat "${VM_PIDDIR}/${name}.disk")
+    local seed="${CLOUD_INIT_DIR}/${name}/seed.iso"
+    # VNC display number = port - 5900
+    local vnc_display=$(( vnc_port - 5900 ))
+
+    ip netns exec "$ns" qemu-system-x86_64 \
+        -enable-kvm \
+        -m "$VM_RAM_MB" \
+        -smp "$VM_CPUS" \
+        -drive file="$dev",format=raw,if=virtio,cache=none \
+        -drive file="$seed",media=cdrom,readonly=on \
+        -netdev tap,id=net0,ifname="$tap",script=no,downscript=no \
+        -device virtio-net-pci,netdev=net0,mac="$mac" \
+        -vnc "127.0.0.1:${vnc_display}" \
+        -serial "file:${VM_LOGDIR}/${name}-console.log" \
+        -name "$name" \
+        -daemonize \
+        -pidfile "${VM_PIDDIR}/${name}.pid"
+
+    echo "[vm] $name started — VNC 127.0.0.1:${vnc_port}  console: ${VM_LOGDIR}/${name}-console.log"
+}
+
+# ----------------------------------------------------------------------------
+# pre-flight: cloud image must exist (downloaded in 00_prereq.sh)
+# ----------------------------------------------------------------------------
+
+if [[ ! -f "$CLOUD_IMAGE_FILE" ]]; then
+    echo "[vm] cloud image not found — downloading ..."
+    wget -q --show-progress -O "$CLOUD_IMAGE_FILE" "$CLOUD_IMAGE_URL"
+fi
+
+# ----------------------------------------------------------------------------
+# per-VM: image install + seed ISO
+# ----------------------------------------------------------------------------
+
+install_image "$(cat "${VM_PIDDIR}/${VM1_NAME}.disk")"
+install_image "$(cat "${VM_PIDDIR}/${VM2_NAME}.disk")"
+install_image "$(cat "${VM_PIDDIR}/${VM3_NAME}.disk")"
+
+make_seed "$VM1_NAME" "$VM1_IP" "$VM1_MAC"
+make_seed "$VM2_NAME" "$VM2_IP" "$VM2_MAC"
+make_seed "$VM3_NAME" "$VM3_IP" "$VM3_MAC"
+
+# ----------------------------------------------------------------------------
+# launch VMs
+# ----------------------------------------------------------------------------
+
+launch_vm "$VM1_NAME" "$VNET_A_NS" "$TAP_VM1" "$VM1_VNC_PORT" "$VM1_MAC"
+launch_vm "$VM2_NAME" "$VNET_A_NS" "$TAP_VM2" "$VM2_VNC_PORT" "$VM2_MAC"
+launch_vm "$VM3_NAME" "$VNET_B_NS" "$TAP_VM3" "$VM3_VNC_PORT" "$VM3_MAC"
+
+echo "[vm] all VMs running"
+echo "  VNC access: vncviewer 127.0.0.1:<port>"
+echo "  SSH access: ssh ubuntu@127.0.0.1 -p <SSH_PORT>  (password: ubuntu)"

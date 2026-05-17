@@ -33,32 +33,6 @@ NETPLAN_FILE=${NETPLAN_FILE:-/etc/netplan/99-vms-vnet.yaml}
 HOST_NIC=$(ip route get 8.8.8.8 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i=="dev") print $(i+1)}' | head -1 || echo "")
 
 # ----------------------------------------------------------------------------
-# VMs — graceful shutdown then force kill
-# ----------------------------------------------------------------------------
-
-for name in "$VM1_NAME" "$VM2_NAME" "$VM3_NAME"; do
-    pidfile="${VM_PIDDIR}/${name}.pid"
-    [[ ! -f "$pidfile" ]] && continue
-
-    pid=$(cat "$pidfile")
-
-    # SIGTERM: ask QEMU to shut down gracefully
-    kill -TERM "$pid" 2>/dev/null || { rm -f "$pidfile"; continue; }
-
-    # wait up to 10s for clean exit
-    for _ in $(seq 10); do
-        kill -0 "$pid" 2>/dev/null || break
-        sleep 1
-    done
-
-    # still alive → force kill
-    kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
-
-    rm -f "$pidfile"
-    echo "[cleanup] stopped $name (pid $pid)"
-done
-
-# ----------------------------------------------------------------------------
 # iptables: inbound DNAT
 # ----------------------------------------------------------------------------
 

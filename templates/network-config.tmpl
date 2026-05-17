@@ -1,0 +1,14 @@
+version: 2
+ethernets:
+  id0:
+    match:
+      macaddress: __VM_MAC__
+    dhcp4: no
+    addresses:
+      - __VM_IP__/__VM_PREFIX__
+    routes:
+      - to: default
+        via: __VM_GW__
+    nameservers:
+      addresses:
+        - 8.8.8.8
