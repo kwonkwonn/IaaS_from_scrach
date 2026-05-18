@@ -87,7 +87,7 @@ else
 fi
 
 # single-node: no replication (data loss on OSD failure is acceptable in this lab)
-microceph.ceph osd pool set "$CEPH_POOL" size 1
+microceph.ceph osd pool set "$CEPH_POOL" size 1 --yes-i-really-mean-it
 microceph.ceph osd pool set "$CEPH_POOL" min_size 1
 
 # ── kernel modules ───────────────────────────────────────────────────────────
