@@ -39,6 +39,11 @@ CLOUD_IMAGE_FILE=${CLOUD_IMAGE_FILE:-/tmp/noble-cloudimg.img}
 CLOUD_INIT_DIR=${CLOUD_INIT_DIR:-/tmp/cloud-init}
 VM_PIDDIR=${VM_PIDDIR:-/run/vms}
 VM_LOGDIR=${VM_LOGDIR:-/var/log/vms}
+CEPH_POOL=${CEPH_POOL:-vms}
+CEPH_CONF=${CEPH_CONF:-/var/snap/microceph/current/conf/ceph.conf}
+CEPH_KEYRING=${CEPH_KEYRING:-/var/snap/microceph/current/conf/ceph.client.admin.keyring}
+
+RBD="microceph.rbd"
 
 TMPL_DIR="$(dirname "$0")/templates"
 
@@ -60,16 +65,18 @@ render_tmpl() {
     echo "$content"
 }
 
-# install_image <block-dev>
-#   writes cloud image to block device (skips if partition table already present)
+# install_image <pool/name>
+#   writes cloud image to RBD image (skips if already written, tracked by rbd snap)
 install_image() {
-    local dev=$1
-    if fdisk -l "$dev" 2>/dev/null | grep -q "Linux"; then
-        echo "[vm] $dev already has a partition table — skipping image write"
+    local img=$1
+    local rbd_url="rbd:${img}:conf=${CEPH_CONF}:keyring=${CEPH_KEYRING}"
+    if $RBD snap ls "$img" 2>/dev/null | grep -qw "installed"; then
+        echo "[vm] $img already has OS — skipping image write"
         return
     fi
-    echo "[vm] writing cloud image to $dev ..."
-    qemu-img convert -f qcow2 -O raw "$CLOUD_IMAGE_FILE" "$dev"
+    echo "[vm] writing cloud image to $img ..."
+    qemu-img convert -f qcow2 -O raw "$CLOUD_IMAGE_FILE" "$rbd_url"
+    $RBD snap create "${img}@installed"
 }
 
 # make_seed <vm-name> <vm-ip> <vm-mac>
@@ -99,17 +106,17 @@ make_seed() {
 #   runs QEMU inside the given network namespace
 launch_vm() {
     local name=$1 ns=$2 tap=$3 vnc_port=$4 mac=$5
-    local dev
-    dev=$(cat "${VM_PIDDIR}/${name}.disk")
+    local img
+    img=$(cat "${VM_PIDDIR}/${name}.disk")
+    local rbd_drive="format=raw,file=rbd:${img}:conf=${CEPH_CONF}:keyring=${CEPH_KEYRING},if=virtio,cache=none"
     local seed="${CLOUD_INIT_DIR}/${name}/seed.iso"
-    # VNC display number = port - 5900
     local vnc_display=$(( vnc_port - 5900 ))
 
     ip netns exec "$ns" qemu-system-x86_64 \
         -enable-kvm \
         -m "$VM_RAM_MB" \
         -smp "$VM_CPUS" \
-        -drive file="$dev",format=raw,if=virtio,cache=none \
+        -drive "$rbd_drive" \
         -drive file="$seed",media=cdrom,readonly=on \
         -netdev tap,id=net0,ifname="$tap",script=no,downscript=no \
         -device virtio-net-pci,netdev=net0,mac="$mac" \

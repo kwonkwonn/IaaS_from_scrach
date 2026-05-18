@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Storage provisioning — loop device backend (placeholder for Ceph RBD)
-#
-# 03_vm.sh reads /run/vms/vm{1,2,3}.disk for the block device path.
-# Replace this script with 01_microceph.sh later; no other script changes.
-
 # ----------------------------------------------------------------------------
 # variables  (Makefile exports override; defaults allow standalone run)
 # ----------------------------------------------------------------------------
@@ -15,69 +10,45 @@ VM2_NAME=${VM2_NAME:-vm2}
 VM3_NAME=${VM3_NAME:-vm3}
 VM_DISK_SIZE=${VM_DISK_SIZE:-20G}
 VM_PIDDIR=${VM_PIDDIR:-/run/vms}
-DISK_DIR=${DISK_DIR:-/var/lib/vm-disks}
+CEPH_POOL=${CEPH_POOL:-vms}
+CEPH_CONF=${CEPH_CONF:-/var/snap/microceph/current/conf/ceph.conf}
+CEPH_KEYRING=${CEPH_KEYRING:-/var/snap/microceph/current/conf/ceph.client.admin.keyring}
+
+RBD="microceph.rbd"
 
 # ----------------------------------------------------------------------------
-# pre-flight: disk space
+# helpers
 # ----------------------------------------------------------------------------
 
-# VM_DISK_SIZE is like "20G" — convert to bytes for comparison
-_size_bytes() {
-    local s=${1^^}  # uppercase
+# convert "20G" → MB for rbd create --size
+_size_mb() {
+    local s=${1^^}
     case $s in
-        *G) echo $(( ${s%G} * 1024 * 1024 * 1024 )) ;;
-        *M) echo $(( ${s%M} * 1024 * 1024 )) ;;
+        *G) echo $(( ${s%G} * 1024 )) ;;
+        *M) echo "${s%M}" ;;
         *)  echo "$s" ;;
     esac
 }
 
-required=$(( $(_size_bytes "$VM_DISK_SIZE") * 3 ))
-available=$(df --output=avail -B1 / | tail -1)
-
-if (( available < required )); then
-    echo "[storage] ERROR: need $(( required / 1024 / 1024 / 1024 ))G, only $(( available / 1024 / 1024 / 1024 ))G available"
-    exit 1
-fi
-
 # ----------------------------------------------------------------------------
-# disk images
+# provision
 # ----------------------------------------------------------------------------
 
-mkdir -p "$DISK_DIR" "$VM_PIDDIR"
+mkdir -p "$VM_PIDDIR"
+
+size_mb=$(_size_mb "$VM_DISK_SIZE")
 
 for name in "$VM1_NAME" "$VM2_NAME" "$VM3_NAME"; do
-    img="$DISK_DIR/${name}.raw"
-
-    if [[ -f "$img" ]]; then
-        echo "[storage] $img already exists — skipping"
-        continue
+    if ! $RBD info "${CEPH_POOL}/${name}"; then
+        $RBD create "${CEPH_POOL}/${name}" --size "$size_mb"
+        echo "[storage] created RBD image ${CEPH_POOL}/${name} (${VM_DISK_SIZE})"
+    else
+        echo "[storage] ${CEPH_POOL}/${name} already exists — skipping"
     fi
 
-    qemu-img create -f raw "$img" "$VM_DISK_SIZE"
-    echo "[storage] created $img ($VM_DISK_SIZE)"
+    echo "${CEPH_POOL}/${name}" > "${VM_PIDDIR}/${name}.disk"
+    echo "[storage] $name → ${CEPH_POOL}/${name}"
 done
-
-# ----------------------------------------------------------------------------
-# loop device mapping
-# ----------------------------------------------------------------------------
-
-for name in "$VM1_NAME" "$VM2_NAME" "$VM3_NAME"; do
-    img="$DISK_DIR/${name}.raw"
-
-    # detach ALL stale loops for this image (losetup -j may return multiple)
-    while IFS= read -r dev; do
-        [[ -z "$dev" ]] && continue
-        losetup -d "$dev" || echo "[storage] warn: could not detach $dev (busy?) — continuing"
-    done < <(losetup -j "$img" | cut -d: -f1)
-
-    dev=$(losetup -f --show "$img")
-    echo "$dev" > "${VM_PIDDIR}/${name}.disk"
-    echo "[storage] $name → $dev"
-done
-
-# ----------------------------------------------------------------------------
-# summary
-# ----------------------------------------------------------------------------
 
 echo "[storage] provisioned:"
 for name in "$VM1_NAME" "$VM2_NAME" "$VM3_NAME"; do

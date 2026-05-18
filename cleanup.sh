@@ -9,8 +9,12 @@ VM1_NAME=${VM1_NAME:-vm1}
 VM2_NAME=${VM2_NAME:-vm2}
 VM3_NAME=${VM3_NAME:-vm3}
 VM_PIDDIR=${VM_PIDDIR:-/run/vms}
-DISK_DIR=${DISK_DIR:-/var/lib/vm-disks}
 CLOUD_IMAGE_FILE=${CLOUD_IMAGE_FILE:-/tmp/noble-cloudimg.img}
+CEPH_POOL=${CEPH_POOL:-vms}
+CEPH_CONF=${CEPH_CONF:-/var/snap/microceph/current/conf/ceph.conf}
+CEPH_KEYRING=${CEPH_KEYRING:-/var/snap/microceph/current/conf/ceph.client.admin.keyring}
+
+RBD="microceph.rbd"
 CLOUD_INIT_DIR=${CLOUD_INIT_DIR:-/tmp/cloud-init}
 
 VNET_A_NS=${VNET_A_NS:-vnet-a}
@@ -104,22 +108,17 @@ rm -f "$NETPLAN_FILE"
 netplan apply 2>/dev/null || true
 
 # ----------------------------------------------------------------------------
-# loop devices
+# RBD: remove images
 # ----------------------------------------------------------------------------
 
 for name in "$VM1_NAME" "$VM2_NAME" "$VM3_NAME"; do
-    img="$DISK_DIR/${name}.raw"
-    while IFS= read -r dev; do
-        [[ -z "$dev" ]] && continue
-        losetup -d "$dev" 2>/dev/null && echo "[cleanup] detached $dev" || true
-    done < <(losetup -j "$img" 2>/dev/null | cut -d: -f1)
+    $RBD rm "${CEPH_POOL}/${name}" 2>/dev/null && echo "[cleanup] removed ${CEPH_POOL}/${name}" || true
 done
 
 # ----------------------------------------------------------------------------
 # files
 # ----------------------------------------------------------------------------
 
-rm -rf "$DISK_DIR"
 rm -rf "$CLOUD_INIT_DIR"
 rm -f  "$CLOUD_IMAGE_FILE"
 rm -f  "${VM_PIDDIR}"/*.disk 2>/dev/null || true
