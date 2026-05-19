@@ -10,21 +10,61 @@ VM2_NAME=${VM2_NAME:-vm2}
 VM3_NAME=${VM3_NAME:-vm3}
 VM_PIDDIR=${VM_PIDDIR:-/run/vms}
 CEPH_POOL=${CEPH_POOL:-vms}
+CEPH_CONF=${CEPH_CONF:-/var/snap/microceph/current/conf/ceph.conf}
+CEPH_KEYRING=${CEPH_KEYRING:-/var/snap/microceph/current/conf/ceph.client.admin.keyring}
+VM_DISK_SIZE=${VM_DISK_SIZE:-20G}
+
+CLOUD_IMAGE_URL=${CLOUD_IMAGE_URL:-https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img}
+CLOUD_IMAGE_FILE=${CLOUD_IMAGE_FILE:-/tmp/noble-cloudimg.img}
+
+RBD="microceph.rbd"
 
 # ----------------------------------------------------------------------------
-# provision
+# functions
+# ----------------------------------------------------------------------------
+
+# install_image <pool/name>
+#   creates RBD image and writes cloud image to it; idempotent via @installed snap
+install_image() {
+    local img=$1
+    local rbd_url="rbd:${img}:conf=${CEPH_CONF}:keyring=${CEPH_KEYRING}"
+
+    if ! $RBD info "$img" &>/dev/null; then
+        echo "[storage] creating RBD image $img (${VM_DISK_SIZE}) ..."
+        $RBD create --size "$VM_DISK_SIZE" "$img"
+    fi
+
+    if $RBD snap ls "$img" 2>/dev/null | grep -qw "installed"; then
+        echo "[storage] $img already has OS — skipping image write"
+        return
+    fi
+
+    if [[ ! -f "$CLOUD_IMAGE_FILE" ]]; then
+        echo "[storage] cloud image not found — downloading ..."
+        wget --progress=dot:giga -O "$CLOUD_IMAGE_FILE" "$CLOUD_IMAGE_URL"
+    fi
+
+    echo "[storage] writing cloud image to $img ..."
+    qemu-img convert -f qcow2 -O raw "$CLOUD_IMAGE_FILE" "$rbd_url"
+    $RBD snap create "${img}@installed"
+    echo "[storage] $img ready"
+}
+
+# ----------------------------------------------------------------------------
+# provision: register disk paths + write OS image
 # ----------------------------------------------------------------------------
 
 mkdir -p "$VM_PIDDIR"
 
-# RBD image creation + OS write is handled by qemu-img convert in 03_vm.sh.
-# This script only registers the pool/name so 03_vm.sh knows where to write.
 for name in "$VM1_NAME" "$VM2_NAME" "$VM3_NAME"; do
     echo "${CEPH_POOL}/${name}" > "${VM_PIDDIR}/${name}.disk"
-    echo "[storage] $name → ${CEPH_POOL}/${name}"
 done
 
-echo "[storage] provisioned:"
+install_image "${CEPH_POOL}/${VM1_NAME}"
+install_image "${CEPH_POOL}/${VM2_NAME}"
+install_image "${CEPH_POOL}/${VM3_NAME}"
+
+echo "[storage] all disks ready"
 for name in "$VM1_NAME" "$VM2_NAME" "$VM3_NAME"; do
     echo "  $name  $(cat "${VM_PIDDIR}/${name}.disk")"
 done

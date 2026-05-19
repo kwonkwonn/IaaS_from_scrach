@@ -11,16 +11,16 @@ All configuration (IPs, MACs, ports, disk sizes) is centralized in the `Makefile
 sudo make all
 
 # Individual steps
-sudo make prereq       # install packages, microceph snap, download Ubuntu cloud image (~800 MB total)
-sudo make microceph    # provision loop-device-backed raw disk images for each VM
+sudo make prereq       # install packages, bootstrap microceph cluster + OSD + pool, download Ubuntu cloud image (~800 MB total)
+sudo make microceph    # register RBD image names for each VM (writes to /run/vms/<name>.disk)
 sudo make network      # create network namespaces, bridges, TAP interfaces, iptables rules
-sudo make vms          # write cloud image to disks, build cloud-init seeds, launch QEMU VMs
+sudo make vms          # write cloud image to RBD, build cloud-init seeds, launch QEMU VMs
 
 # Run tests
 sudo make test         # or: sudo bash 04_test.sh
 
 # Tear down everything
-sudo make clean        # kills VMs, removes namespaces, loop devices, disk images, iptables rules
+sudo make clean        # kills VMs, removes namespaces, RBD images, iptables rules, cloud image
 ```
 
 Scripts can also be run standalone (they have built-in defaults matching the Makefile):
@@ -28,16 +28,38 @@ Scripts can also be run standalone (they have built-in defaults matching the Mak
 sudo bash 04_test.sh   # run only tests without re-running setup
 ```
 
-SSH into a running VM:
+SSH into a running VM (direct IP, reachable from host):
 ```bash
 sshpass -p ubuntu ssh -o StrictHostKeyChecking=no ubuntu@192.168.0.1  # vm1
 sshpass -p ubuntu ssh -o StrictHostKeyChecking=no ubuntu@192.168.0.2  # vm2
 sshpass -p ubuntu ssh -o StrictHostKeyChecking=no ubuntu@192.168.0.3  # vm3
 ```
 
+Or via host-forwarded ports (2201–2203 → VM SSH):
+```bash
+sshpass -p ubuntu ssh -o StrictHostKeyChecking=no -p 2201 ubuntu@127.0.0.1  # vm1
+```
+
+VNC and serial console:
+```bash
+vncviewer 127.0.0.1:5901   # vm1 (:5902 vm2, :5903 vm3)
+tail -f /var/log/vms/vm1-console.log   # serial console output
+```
+
 ## Architecture
 
-This project builds a 3-VM lab environment on a single Linux host using KVM/QEMU, with L2 network isolation enforced via Linux network namespaces.
+This project builds a 3-VM lab environment on a single Linux host using KVM/QEMU, Ceph RBD storage (via microceph), and L2 network isolation via Linux network namespaces.
+
+### Script responsibilities
+
+| Script | `make` target | What it does |
+|---|---|---|
+| `00_prereq.sh` | `prereq` | Installs apt packages, bootstraps microceph (cluster + loop OSD + pool), downloads cloud image |
+| `01_microceph.sh` | `microceph` | Writes `<pool>/<name>` to `/run/vms/<name>.disk`, creates RBD images, writes cloud image into each (idempotent via `@installed` snap) |
+| `02_network.sh` | `network` | Creates namespaces, bridges, TAPs, veth pairs, iptables rules, netplan config |
+| `03_vm.sh` | `vms` | Writes cloud image to RBD, builds cloud-init ISOs, launches QEMU inside namespaces |
+| `04_test.sh` | `test` | Three-phase validation (see Test phases below) |
+| `cleanup.sh` | `clean` | Kills VMs, removes namespaces/routes/iptables, deletes RBD images, removes cloud image |
 
 ### Network topology
 
@@ -60,15 +82,20 @@ Host
 - Each namespace has a default route via the veth back to the host, with MASQUERADE NAT for internet access
 - Host has /32 routes (`ip route add 192.168.0.x/32 dev veth-x-host`) and DNAT rules forwarding ports 2201–2203 to VM SSH
 
-### Storage (01_microceph.sh)
+### Storage (00_prereq.sh + 01_microceph.sh + 03_vm.sh)
 
-Currently a **placeholder** for Ceph RBD. It creates raw disk images under `/var/lib/vm-disks/` and exposes them as loop devices. `03_vm.sh` reads the block device path from `/run/vms/<name>.disk`. To swap in real Ceph RBD, only `01_microceph.sh` needs changing — the interface (`/run/vms/<name>.disk` containing the block device path) stays the same.
+VMs boot from **Ceph RBD images** managed by the microceph snap (single-node, loop OSD):
+
+1. `00_prereq.sh` bootstraps microceph: cluster → 30 GB loop OSD → pool `vms` (size=1, min_size=1)
+2. `01_microceph.sh` records `vms/<name>` in `/run/vms/<name>.disk`, then creates each RBD image and writes the cloud image into it via `qemu-img convert`; marks completion with an `@installed` snap so re-runs are skipped
+3. `03_vm.sh` reads the pool/name from `/run/vms/<name>.disk` and passes it as the RBD drive URL to QEMU
+
+To swap in external Ceph: only `00_prereq.sh` and `01_microceph.sh` need changing — `03_vm.sh` just reads the `.disk` file and constructs the `rbd:` URL.
 
 ### VM boot flow (03_vm.sh)
 
-1. Cloud image (`/tmp/noble-cloudimg.img`, Ubuntu Noble) is written to each VM's block device via `qemu-img convert`
-2. Per-VM cloud-init seed ISOs are built from templates in `templates/` using `__PLACEHOLDER__` substitution via `sed`
-3. QEMU is launched inside the appropriate network namespace (`ip netns exec <ns> qemu-system-x86_64 ... -daemonize`) with a TAP interface attached to the namespace bridge
+1. `make_seed()` renders templates in `templates/` (using `__KEY__` → value substitution via `sed`) into cloud-init user-data, meta-data, and network-config, then builds a seed ISO with `cloud-localds`
+2. `launch_vm()` runs `qemu-system-x86_64` inside the correct namespace (`ip netns exec`) with the RBD drive (URL read from `/run/vms/<name>.disk`), seed ISO, and TAP interface; daemonizes and writes PID to `/run/vms/<name>.pid`
 
 ### Templates
 
@@ -87,4 +114,5 @@ Currently a **placeholder** for Ceph RBD. It creates raw disk images under `/var
 ### Prerequisites
 
 - Requires root (`EUID=0`), `/dev/kvm`, and CPU virtualization flags (`vmx`/`svm`)
-- `00_prereq.sh` is idempotent: skips microceph install and image download if already present
+- `00_prereq.sh` is idempotent: skips microceph bootstrap, OSD, pool creation, and image download if already present
+- Kernel modules `tun` (TAP interfaces) and `rbd` (kernel RBD mapping) are loaded by `00_prereq.sh`

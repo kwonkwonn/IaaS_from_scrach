@@ -33,17 +33,11 @@ VM1_VNC_PORT=${VM1_VNC_PORT:-5901}
 VM2_VNC_PORT=${VM2_VNC_PORT:-5902}
 VM3_VNC_PORT=${VM3_VNC_PORT:-5903}
 
-CLOUD_IMAGE_URL=${CLOUD_IMAGE_URL:-https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img}
-CLOUD_IMAGE_FILE=${CLOUD_IMAGE_FILE:-/tmp/noble-cloudimg.img}
-
 CLOUD_INIT_DIR=${CLOUD_INIT_DIR:-/tmp/cloud-init}
 VM_PIDDIR=${VM_PIDDIR:-/run/vms}
 VM_LOGDIR=${VM_LOGDIR:-/var/log/vms}
-CEPH_POOL=${CEPH_POOL:-vms}
 CEPH_CONF=${CEPH_CONF:-/var/snap/microceph/current/conf/ceph.conf}
 CEPH_KEYRING=${CEPH_KEYRING:-/var/snap/microceph/current/conf/ceph.client.admin.keyring}
-
-RBD="microceph.rbd"
 
 TMPL_DIR="$(dirname "$0")/templates"
 
@@ -52,7 +46,6 @@ TMPL_DIR="$(dirname "$0")/templates"
 # ----------------------------------------------------------------------------
 
 # render_tmpl <template> <key=value> ...
-#   substitutes __KEY__ placeholders via sed
 render_tmpl() {
     local tmpl=$1; shift
     local content
@@ -63,20 +56,6 @@ render_tmpl() {
         content=$(echo "$content" | sed "s|__${key}__|${val}|g")
     done
     echo "$content"
-}
-
-# install_image <pool/name>
-#   writes cloud image to RBD image (skips if already written, tracked by rbd snap)
-install_image() {
-    local img=$1
-    local rbd_url="rbd:${img}:conf=${CEPH_CONF}:keyring=${CEPH_KEYRING}"
-    if $RBD snap ls "$img" 2>/dev/null | grep -qw "installed"; then
-        echo "[vm] $img already has OS — skipping image write"
-        return
-    fi
-    echo "[vm] writing cloud image to $img ..."
-    qemu-img convert -f qcow2 -O raw "$CLOUD_IMAGE_FILE" "$rbd_url"
-    $RBD snap create "${img}@installed"
 }
 
 # make_seed <vm-name> <vm-ip> <vm-mac>
@@ -130,21 +109,8 @@ launch_vm() {
 }
 
 # ----------------------------------------------------------------------------
-# pre-flight: cloud image must exist (downloaded in 00_prereq.sh)
+# per-VM: seed ISO + launch
 # ----------------------------------------------------------------------------
-
-if [[ ! -f "$CLOUD_IMAGE_FILE" ]]; then
-    echo "[vm] cloud image not found — downloading ..."
-    wget -q --show-progress -O "$CLOUD_IMAGE_FILE" "$CLOUD_IMAGE_URL"
-fi
-
-# ----------------------------------------------------------------------------
-# per-VM: image install + seed ISO
-# ----------------------------------------------------------------------------
-
-install_image "$(cat "${VM_PIDDIR}/${VM1_NAME}.disk")"
-install_image "$(cat "${VM_PIDDIR}/${VM2_NAME}.disk")"
-install_image "$(cat "${VM_PIDDIR}/${VM3_NAME}.disk")"
 
 make_seed "$VM1_NAME" "$VM1_IP" "$VM1_MAC"
 make_seed "$VM2_NAME" "$VM2_IP" "$VM2_MAC"
