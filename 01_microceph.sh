@@ -23,31 +23,6 @@ RBD="microceph.rbd"
 # functions
 # ----------------------------------------------------------------------------
 
-# apply_qos <pool/name>
-#   sets non-zero librbd QoS limits on the image via config image set (0 = unlimited)
-apply_qos() {
-    local img=$1
-    declare -A qos=(
-        [rbd_qos_iops_limit]="${VM_QOS_IOPS_LIMIT:-0}"
-        [rbd_qos_bps_limit]="${VM_QOS_BPS_LIMIT:-0}"
-        [rbd_qos_read_iops_limit]="${VM_QOS_READ_IOPS_LIMIT:-0}"
-        [rbd_qos_write_iops_limit]="${VM_QOS_WRITE_IOPS_LIMIT:-0}"
-        [rbd_qos_read_bps_limit]="${VM_QOS_READ_BPS_LIMIT:-0}"
-        [rbd_qos_write_bps_limit]="${VM_QOS_WRITE_BPS_LIMIT:-0}"
-        [rbd_qos_iops_burst]="${VM_QOS_IOPS_BURST:-0}"
-        [rbd_qos_bps_burst]="${VM_QOS_BPS_BURST:-0}"
-    )
-    local applied=0
-    for key in "${!qos[@]}"; do
-        local val="${qos[$key]}"
-        if [[ "$val" -gt 0 ]]; then
-            $RBD config image set "$img" "$key" "$val"
-            echo "[storage] QoS: $img $key = $val"
-            applied=1
-        fi
-    done
-    [[ $applied -eq 0 ]] && echo "[storage] QoS: $img unlimited (all limits = 0)"
-}
 
 # install_image <pool/name>
 #   creates RBD image and writes cloud image to it; idempotent via @installed snap
@@ -89,7 +64,6 @@ done
 
 for name in "$VM1_NAME" "$VM2_NAME" "$VM3_NAME"; do
     install_image "${CEPH_POOL}/${name}"
-    apply_qos    "${CEPH_POOL}/${name}"
 done
 
 echo "[storage] all disks ready"

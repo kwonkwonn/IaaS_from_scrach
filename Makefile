@@ -58,19 +58,19 @@ VETH_B_HOST_IP   := 10.0.1.1
 VETH_B_NS_IP     := 10.0.1.2
 VETH_PREFIX      := 30
 
-# ── Storage QoS  (0 = unlimited / fair-share) ───────────────────────────────
-VM_QOS_BENCH            := 0        # 1 = inject dd benchmark via cloud-init
+# ── Storage QoS ─────────────────────────────────────────────────────────────
+VM_QOS_BENCH            := 1
 QOS_BENCH_LOG           := /var/log/qos_bench.log
 QOS_BENCH_BS            := 4k
-QOS_BENCH_COUNT         := 25600    # 100 MB
-VM_QOS_IOPS_LIMIT       := 0
-VM_QOS_BPS_LIMIT        := 0
-VM_QOS_READ_IOPS_LIMIT  := 0
-VM_QOS_WRITE_IOPS_LIMIT := 0
-VM_QOS_READ_BPS_LIMIT   := 0
-VM_QOS_WRITE_BPS_LIMIT  := 0
-VM_QOS_IOPS_BURST       := 0
-VM_QOS_BPS_BURST        := 0
+QOS_BENCH_COUNT         := 25600
+VM_QOS_IOPS_LIMIT       := 0        # e.g. 500   — total read+write IOPS cap (ops/sec)
+VM_QOS_BPS_LIMIT        := 0        # e.g. 52428800   — total 50 MB/s cap (bytes/sec)
+VM_QOS_READ_IOPS_LIMIT  := 0        # e.g. 300   — read IOPS cap (ops/sec)
+VM_QOS_WRITE_IOPS_LIMIT := 0        # e.g. 200   — write IOPS cap (ops/sec)
+VM_QOS_READ_BPS_LIMIT   := 0       # e.g. 31457280   — read 30 MB/s (bytes/sec)
+VM_QOS_WRITE_BPS_LIMIT  := 0     # e.g. 20971520   — write 20 MB/s (bytes/sec)
+VM_QOS_IOPS_BURST       := 0        # e.g. 1000  — burst IOPS, must be >= IOPS_LIMIT
+VM_QOS_BPS_BURST        := 0        # e.g. 104857600  — burst 100 MB/s, must be >= BPS_LIMIT
 
 # ── Cloud image ─────────────────────────────────────────────────────────────
 CLOUD_IMAGE_URL  := https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img

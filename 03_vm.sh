@@ -106,7 +106,27 @@ launch_vm() {
     local name=$1 ns=$2 tap=$3 vnc_port=$4 mac=$5
     local img
     img=$(cat "${VM_PIDDIR}/${name}.disk")
-    local rbd_drive="format=raw,file=rbd:${img}:conf=${CEPH_CONF}:keyring=${CEPH_KEYRING},if=virtio,cache=none"
+
+    local qos_bps_total=$(( ${VM_QOS_BPS_LIMIT:-0} ))
+    local qos_bps_read=$(( ${VM_QOS_READ_BPS_LIMIT:-0} ))
+    local qos_bps_write=$(( ${VM_QOS_WRITE_BPS_LIMIT:-0} ))
+    local qos_iops_total=$(( ${VM_QOS_IOPS_LIMIT:-0} ))
+    local qos_iops_read=$(( ${VM_QOS_READ_IOPS_LIMIT:-0} ))
+    local qos_iops_write=$(( ${VM_QOS_WRITE_IOPS_LIMIT:-0} ))
+    local qos_bps_burst=$(( ${VM_QOS_BPS_BURST:-0} ))
+    local qos_iops_burst=$(( ${VM_QOS_IOPS_BURST:-0} ))
+
+    local throttle=""
+    [[ $qos_bps_total  -gt 0 ]] && throttle+="${throttle:+,}throttling.bps-total=${qos_bps_total}"
+    [[ $qos_bps_read   -gt 0 ]] && throttle+="${throttle:+,}throttling.bps-read=${qos_bps_read}"
+    [[ $qos_bps_write  -gt 0 ]] && throttle+="${throttle:+,}throttling.bps-write=${qos_bps_write}"
+    [[ $qos_iops_total -gt 0 ]] && throttle+="${throttle:+,}throttling.iops-total=${qos_iops_total}"
+    [[ $qos_iops_read  -gt 0 ]] && throttle+="${throttle:+,}throttling.iops-read=${qos_iops_read}"
+    [[ $qos_iops_write -gt 0 ]] && throttle+="${throttle:+,}throttling.iops-write=${qos_iops_write}"
+    [[ $qos_bps_burst  -gt 0 ]] && throttle+="${throttle:+,}throttling.bps-total-max=${qos_bps_burst}"
+    [[ $qos_iops_burst -gt 0 ]] && throttle+="${throttle:+,}throttling.iops-total-max=${qos_iops_burst}"
+
+    local rbd_drive="format=raw,file=rbd:${img}:conf=${CEPH_CONF}:keyring=${CEPH_KEYRING},if=virtio,cache=none${throttle:+,$throttle}"
     local seed="${CLOUD_INIT_DIR}/${name}/seed.iso"
     local vnc_display=$(( vnc_port - 5900 ))
 

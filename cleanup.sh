@@ -117,20 +117,12 @@ for name in "$VM1_NAME" "$VM2_NAME" "$VM3_NAME"; do
     $RBD rm "${CEPH_POOL}/${name}" 2>/dev/null && echo "[cleanup] removed ${CEPH_POOL}/${name}" || true
 done
 
-# pool
+# pool only — do NOT remove OSDs; ceph osd rm on a live daemon fails silently
+# and leaves the cluster in a degraded state that causes rbd I/O to hang
 microceph.ceph config set mon mon_allow_pool_delete true 2>/dev/null || true
 microceph.ceph osd pool delete "$CEPH_POOL" "$CEPH_POOL" \
     --yes-i-really-really-mean-it 2>/dev/null \
     && echo "[cleanup] deleted pool ${CEPH_POOL}" || true
-
-# OSDs
-for osd_id in $(microceph.ceph osd ls 2>/dev/null); do
-    microceph.ceph osd out "osd.${osd_id}" 2>/dev/null || true
-    microceph.ceph osd crush remove "osd.${osd_id}" 2>/dev/null || true
-    microceph.ceph auth del "osd.${osd_id}" 2>/dev/null || true
-    microceph.ceph osd rm "$osd_id" 2>/dev/null || true
-    echo "[cleanup] removed osd.${osd_id}"
-done
 
 # ----------------------------------------------------------------------------
 # files
