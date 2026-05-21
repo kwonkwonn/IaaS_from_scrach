@@ -68,6 +68,25 @@ make_seed() {
     render_tmpl "${TMPL_DIR}/user-data.tmpl"       "VM_NAME=${name}" \
         > "${dir}/user-data"
 
+    if [[ "${VM_QOS_BENCH:-0}" -eq 1 ]]; then
+        local bench_script
+        bench_script=$(render_tmpl "${TMPL_DIR}/qos_bench.sh.tmpl" \
+            "LOG_PATH=${QOS_BENCH_LOG:-/var/log/qos_bench.log}" \
+            "DD_BS=${QOS_BENCH_BS:-4k}" \
+            "DD_COUNT=${QOS_BENCH_COUNT:-25600}")
+        cat >> "${dir}/user-data" << CLOUDINIT
+
+write_files:
+  - path: /usr/local/bin/qos_bench.sh
+    permissions: '0755'
+    content: |
+$(echo "$bench_script" | sed 's/^/      /')
+
+runcmd:
+  - /usr/local/bin/qos_bench.sh
+CLOUDINIT
+    fi
+
     render_tmpl "${TMPL_DIR}/meta-data.tmpl"       "VM_NAME=${name}" \
         > "${dir}/meta-data"
 

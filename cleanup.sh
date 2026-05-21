@@ -16,6 +16,7 @@ CEPH_KEYRING=${CEPH_KEYRING:-/var/snap/microceph/current/conf/ceph.client.admin.
 
 RBD="microceph.rbd"
 CLOUD_INIT_DIR=${CLOUD_INIT_DIR:-/tmp/cloud-init}
+VM_LOGDIR=${VM_LOGDIR:-/var/log/vms}
 
 VNET_A_NS=${VNET_A_NS:-vnet-a}
 VNET_B_NS=${VNET_B_NS:-vnet-b}
@@ -108,11 +109,27 @@ rm -f "$NETPLAN_FILE"
 netplan apply 2>/dev/null || true
 
 # ----------------------------------------------------------------------------
-# RBD: remove images
+# Ceph: RBD images → pool → OSDs
 # ----------------------------------------------------------------------------
 
 for name in "$VM1_NAME" "$VM2_NAME" "$VM3_NAME"; do
+    $RBD snap purge "${CEPH_POOL}/${name}" 2>/dev/null || true
     $RBD rm "${CEPH_POOL}/${name}" 2>/dev/null && echo "[cleanup] removed ${CEPH_POOL}/${name}" || true
+done
+
+# pool
+microceph.ceph config set mon mon_allow_pool_delete true 2>/dev/null || true
+microceph.ceph osd pool delete "$CEPH_POOL" "$CEPH_POOL" \
+    --yes-i-really-really-mean-it 2>/dev/null \
+    && echo "[cleanup] deleted pool ${CEPH_POOL}" || true
+
+# OSDs
+for osd_id in $(microceph.ceph osd ls 2>/dev/null); do
+    microceph.ceph osd out "osd.${osd_id}" 2>/dev/null || true
+    microceph.ceph osd crush remove "osd.${osd_id}" 2>/dev/null || true
+    microceph.ceph auth del "osd.${osd_id}" 2>/dev/null || true
+    microceph.ceph osd rm "$osd_id" 2>/dev/null || true
+    echo "[cleanup] removed osd.${osd_id}"
 done
 
 # ----------------------------------------------------------------------------
@@ -122,5 +139,6 @@ done
 rm -rf "$CLOUD_INIT_DIR"
 rm -f  "$CLOUD_IMAGE_FILE"
 rm -f  "${VM_PIDDIR}"/*.disk 2>/dev/null || true
+rm -f  "${VM_LOGDIR}"/*.log  2>/dev/null || true
 
 echo "[cleanup] done"

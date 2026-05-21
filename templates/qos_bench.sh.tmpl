@@ -1,0 +1,17 @@
+#!/bin/bash
+LOG=__LOG_PATH__
+BS=__DD_BS__
+COUNT=__DD_COUNT__
+
+{
+    echo "=== QoS Benchmark - $(hostname) - $(date -u) ==="
+
+    echo "--- write (bs=${BS} count=${COUNT}) ---"
+    dd if=/dev/zero of=/tmp/qos_bench bs="${BS}" count="${COUNT}" oflag=direct 2>&1 | tail -1
+
+    echo "--- read ---"
+    dd if=/tmp/qos_bench of=/dev/null bs="${BS}" count="${COUNT}" iflag=direct 2>&1 | tail -1
+
+    rm -f /tmp/qos_bench
+    echo "=== done ==="
+} >> "$LOG" 2>&1

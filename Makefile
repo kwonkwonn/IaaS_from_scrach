@@ -58,6 +58,20 @@ VETH_B_HOST_IP   := 10.0.1.1
 VETH_B_NS_IP     := 10.0.1.2
 VETH_PREFIX      := 30
 
+# ── Storage QoS  (0 = unlimited / fair-share) ───────────────────────────────
+VM_QOS_BENCH            := 0        # 1 = inject dd benchmark via cloud-init
+QOS_BENCH_LOG           := /var/log/qos_bench.log
+QOS_BENCH_BS            := 4k
+QOS_BENCH_COUNT         := 25600    # 100 MB
+VM_QOS_IOPS_LIMIT       := 0
+VM_QOS_BPS_LIMIT        := 0
+VM_QOS_READ_IOPS_LIMIT  := 0
+VM_QOS_WRITE_IOPS_LIMIT := 0
+VM_QOS_READ_BPS_LIMIT   := 0
+VM_QOS_WRITE_BPS_LIMIT  := 0
+VM_QOS_IOPS_BURST       := 0
+VM_QOS_BPS_BURST        := 0
+
 # ── Cloud image ─────────────────────────────────────────────────────────────
 CLOUD_IMAGE_URL  := https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
 CLOUD_IMAGE_FILE := /tmp/noble-cloudimg.img
@@ -69,7 +83,7 @@ CLOUD_INIT_DIR   := /tmp/cloud-init
 DISK_DIR         := /var/lib/vm-disks
 
 # ── Targets ─────────────────────────────────────────────────────────────────
-.PHONY: all prereq microceph network vms test clean
+.PHONY: all prereq microceph network vms test snapshot snapshot-list snapshot-rollback snapshot-purge clean
 
 all: prereq microceph network vms
 
@@ -87,6 +101,20 @@ vms: microceph network
 
 test:
 	bash 04_test.sh
+
+snapshot:
+	bash 05_snapshot.sh create $(if $(VM),$(VM),all)
+
+snapshot-list:
+	bash 05_snapshot.sh list $(if $(VM),$(VM),all)
+
+snapshot-rollback:
+	@[[ -n "$(VM)" && -n "$(SNAP)" ]] || \
+		{ echo "Usage: make snapshot-rollback VM=<vm> SNAP=<snap-name>"; exit 1; }
+	bash 05_snapshot.sh rollback $(VM) $(SNAP)
+
+snapshot-purge:
+	bash 05_snapshot.sh purge $(if $(VM),$(VM),all)
 
 clean:
 	bash cleanup.sh

@@ -23,6 +23,11 @@ VM_GW=${VM_GW:-192.168.0.254}
 VM_USER=${VM_USER:-ubuntu}
 VM_PASS=${VM_PASS:-ubuntu}
 
+VM_QOS_BENCH=${VM_QOS_BENCH:-0}
+VM_QOS_BPS_LIMIT=${VM_QOS_BPS_LIMIT:-0}
+VM_QOS_IOPS_LIMIT=${VM_QOS_IOPS_LIMIT:-0}
+QOS_BENCH_LOG=${QOS_BENCH_LOG:-/var/log/qos_bench.log}
+
 SSH_TIMEOUT=${SSH_TIMEOUT:-180}   # seconds to wait for each VM's SSH
 SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o BatchMode=no"
 
@@ -191,6 +196,60 @@ if [[ $vm2_up -eq 1 && $vm3_up -eq 1 ]]; then
     fi
 else
     echo "[test] skip vm2→vm3 (one or both VMs unreachable)"
+fi
+
+# ----------------------------------------------------------------------------
+# phase 4 — QoS benchmark (only when VM_QOS_BENCH=1)
+# ----------------------------------------------------------------------------
+
+if [[ "${VM_QOS_BENCH}" -eq 1 ]]; then
+    echo ""
+    echo "=== Phase 4: QoS benchmark ==="
+
+    # parse_bps <log-line>  →  bytes/sec as integer
+    parse_bps() {
+        local line=$1
+        local val unit
+        if [[ "$line" =~ ([0-9]+(\.[0-9]+)?)[[:space:]]*(GB/s|MB/s|kB/s|B/s) ]]; then
+            val="${BASH_REMATCH[1]}"
+            unit="${BASH_REMATCH[3]}"
+            case "$unit" in
+                GB/s) echo "${val%.*}000000000" ;;
+                MB/s) echo "${val%.*}000000" ;;
+                kB/s) echo "${val%.*}000" ;;
+                B/s)  echo "${val%.*}" ;;
+            esac
+        else
+            echo "0"
+        fi
+    }
+
+    for vm_ip in "$VM1_IP" "$VM2_IP" "$VM3_IP"; do
+        local_name="vm${vm_ip##*.}"  # vm1 from 192.168.0.1
+        if ! ssh_run "$vm_ip" "test -f ${QOS_BENCH_LOG}" &>/dev/null; then
+            echo "[bench] ${vm_ip}: log not found — was VM_QOS_BENCH=1 at boot?"
+            continue
+        fi
+
+        log=$(ssh_run "$vm_ip" "cat ${QOS_BENCH_LOG}")
+        write_line=$(echo "$log" | grep -A1 "^--- write" | tail -1)
+        read_line=$(echo  "$log" | grep -A1 "^--- read"  | tail -1)
+
+        echo "[bench] ${vm_ip} write: ${write_line}"
+        echo "[bench] ${vm_ip} read:  ${read_line}"
+
+        if [[ "${VM_QOS_BPS_LIMIT}" -gt 0 ]]; then
+            write_bps=$(parse_bps "$write_line")
+            if [[ "$write_bps" -le "${VM_QOS_BPS_LIMIT}" ]]; then
+                ok "${vm_ip} write BPS within limit (${write_bps} ≤ ${VM_QOS_BPS_LIMIT})"
+            else
+                fail "${vm_ip} write BPS exceeded limit (${write_bps} > ${VM_QOS_BPS_LIMIT})"
+            fi
+        fi
+    done
+else
+    echo ""
+    echo "=== Phase 4: QoS benchmark skipped (VM_QOS_BENCH=0) ==="
 fi
 
 # ----------------------------------------------------------------------------
