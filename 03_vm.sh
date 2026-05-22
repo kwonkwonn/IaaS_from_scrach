@@ -90,9 +90,23 @@ CLOUDINIT
     render_tmpl "${TMPL_DIR}/meta-data.tmpl"       "VM_NAME=${name}" \
         > "${dir}/meta-data"
 
-    render_tmpl "${TMPL_DIR}/network-config.tmpl"  \
-        "VM_IP=${ip}" "VM_PREFIX=${VM_PREFIX}" "VM_GW=${VM_GW}" "VM_MAC=${mac}" \
-        > "${dir}/network-config"
+    cat > "${dir}/network-config" << EOF
+version: 2
+ethernets:
+  id0:
+    match:
+      macaddress: "${mac}"
+    optional: true
+    dhcp4: no
+    addresses:
+      - ${ip}/${VM_PREFIX}
+    routes:
+      - to: default
+        via: ${VM_GW}
+    nameservers:
+      addresses:
+        - 8.8.8.8
+EOF
 
     cloud-localds --network-config="${dir}/network-config" \
         "${dir}/seed.iso" "${dir}/user-data" "${dir}/meta-data"
@@ -165,4 +179,7 @@ launch_vm "$VM3_NAME" "$VNET_B_NS" "$TAP_VM3" "$VM3_VNC_PORT" "$VM3_MAC"
 
 echo "[vm] all VMs running"
 echo "  VNC access: vncviewer 127.0.0.1:<port>"
-echo "  SSH access: ssh ubuntu@127.0.0.1 -p <SSH_PORT>  (password: ubuntu)"
+echo "  SSH access (password: ubuntu):"
+echo "    ssh ubuntu@${VM1_IP}  # ${VM1_NAME}"
+echo "    ssh ubuntu@${VM2_IP}  # ${VM2_NAME}"
+echo "    ssh ubuntu@${VM3_IP}  # ${VM3_NAME}"
