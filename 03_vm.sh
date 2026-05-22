@@ -28,6 +28,10 @@ VNET_B_NS=${VNET_B_NS:-vnet-b}
 
 VM_RAM_MB=${VM_RAM_MB:-2048}
 VM_CPUS=${VM_CPUS:-1}
+VM_CPU_PIN=${VM_CPU_PIN:-0}
+VM1_CPUSET=${VM1_CPUSET:-}
+VM2_CPUSET=${VM2_CPUSET:-}
+VM3_CPUSET=${VM3_CPUSET:-}
 
 VM1_VNC_PORT=${VM1_VNC_PORT:-5901}
 VM2_VNC_PORT=${VM2_VNC_PORT:-5902}
@@ -114,10 +118,11 @@ EOF
     echo "[vm] seed ISO ready: ${dir}/seed.iso"
 }
 
-# launch_vm <vm-name> <ns> <tap> <vnc-port> <mac>
-#   runs QEMU inside the given network namespace
+# launch_vm <vm-name> <ns> <tap> <vnc-port> <mac> [cpuset]
+#   runs QEMU inside the given network namespace;
+#   if VM_CPU_PIN=1 and cpuset is non-empty, pins via taskset -c
 launch_vm() {
-    local name=$1 ns=$2 tap=$3 vnc_port=$4 mac=$5
+    local name=$1 ns=$2 tap=$3 vnc_port=$4 mac=$5 cpuset=${6:-}
     local img
     img=$(cat "${VM_PIDDIR}/${name}.disk")
 
@@ -144,7 +149,13 @@ launch_vm() {
     local seed="${CLOUD_INIT_DIR}/${name}/seed.iso"
     local vnc_display=$(( vnc_port - 5900 ))
 
-    ip netns exec "$ns" qemu-system-x86_64 \
+    local -a launcher=(ip netns exec "$ns")
+    if [[ "${VM_CPU_PIN}" -eq 1 && -n "$cpuset" ]]; then
+        launcher=(taskset -c "$cpuset" ip netns exec "$ns")
+        echo "[vm] $name: CPU pinned to $cpuset"
+    fi
+
+    "${launcher[@]}" qemu-system-x86_64 \
         -enable-kvm \
         -m "$VM_RAM_MB" \
         -smp "$VM_CPUS" \
@@ -173,9 +184,9 @@ make_seed "$VM3_NAME" "$VM3_IP" "$VM3_MAC"
 # launch VMs
 # ----------------------------------------------------------------------------
 
-launch_vm "$VM1_NAME" "$VNET_A_NS" "$TAP_VM1" "$VM1_VNC_PORT" "$VM1_MAC"
-launch_vm "$VM2_NAME" "$VNET_A_NS" "$TAP_VM2" "$VM2_VNC_PORT" "$VM2_MAC"
-launch_vm "$VM3_NAME" "$VNET_B_NS" "$TAP_VM3" "$VM3_VNC_PORT" "$VM3_MAC"
+launch_vm "$VM1_NAME" "$VNET_A_NS" "$TAP_VM1" "$VM1_VNC_PORT" "$VM1_MAC" "$VM1_CPUSET"
+launch_vm "$VM2_NAME" "$VNET_A_NS" "$TAP_VM2" "$VM2_VNC_PORT" "$VM2_MAC" "$VM2_CPUSET"
+launch_vm "$VM3_NAME" "$VNET_B_NS" "$TAP_VM3" "$VM3_VNC_PORT" "$VM3_MAC" "$VM3_CPUSET"
 
 echo "[vm] all VMs running"
 echo "  VNC access: vncviewer 127.0.0.1:<port>"

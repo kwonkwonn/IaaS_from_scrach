@@ -58,19 +58,36 @@ VETH_B_HOST_IP   := 10.0.1.1
 VETH_B_NS_IP     := 10.0.1.2
 VETH_PREFIX      := 30
 
+# ── CPU Pinning ──────────────────────────────────────────────────────────────
+# Inspect topology first, then set VM*_CPUSET to a range (1-2) or list (1,3):
+#   numactl --hardware     # NUMA nodes, CPU lists, inter-node distances
+#   lscpu -e               # per-CPU socket / core / thread layout
+# VMs without a CPUSET float freely across all cores (no pinning applied).
+# Tip: for pinned VMs avoid CPUs heavily used by the host; keep pinned VMs on
+#      a single NUMA node and match --membind to that node for lowest latency.
+# 0 = off  |  1 = apply taskset -c per VM
+VM_CPU_PIN       := 0
+VM1_CPUSET       := 1-1
+VM2_CPUSET       := 2-2
+VM3_CPUSET       := 3-3
+
 # ── Storage QoS ─────────────────────────────────────────────────────────────
 VM_QOS_BENCH            := 1
 QOS_BENCH_LOG           := /var/log/qos_bench.log
 QOS_BENCH_BS            := 4k
 QOS_BENCH_COUNT         := 25600
-VM_QOS_IOPS_LIMIT       := 0        # e.g. 500   — total read+write IOPS cap (ops/sec)
-VM_QOS_BPS_LIMIT        := 0        # e.g. 52428800   — total 50 MB/s cap (bytes/sec)
-VM_QOS_READ_IOPS_LIMIT  := 0        # e.g. 300   — read IOPS cap (ops/sec)
-VM_QOS_WRITE_IOPS_LIMIT := 0        # e.g. 200   — write IOPS cap (ops/sec)
-VM_QOS_READ_BPS_LIMIT   := 0       # e.g. 31457280   — read 30 MB/s (bytes/sec)
-VM_QOS_WRITE_BPS_LIMIT  := 0     # e.g. 20971520   — write 20 MB/s (bytes/sec)
-VM_QOS_IOPS_BURST       := 0        # e.g. 1000  — burst IOPS, must be >= IOPS_LIMIT
-VM_QOS_BPS_BURST        := 0        # e.g. 104857600  — burst 100 MB/s, must be >= BPS_LIMIT
+# IOPS_LIMIT: total read+write IOPS cap (ops/sec),  e.g. 500
+# BPS_LIMIT:  total throughput cap (bytes/sec),      e.g. 52428800  (50 MB/s)
+# READ/WRITE variants split the cap by direction
+# BURST values must be >= their corresponding LIMIT
+VM_QOS_IOPS_LIMIT       := 0
+VM_QOS_BPS_LIMIT        := 0
+VM_QOS_READ_IOPS_LIMIT  := 0
+VM_QOS_WRITE_IOPS_LIMIT := 0
+VM_QOS_READ_BPS_LIMIT   := 0
+VM_QOS_WRITE_BPS_LIMIT  := 0
+VM_QOS_IOPS_BURST       := 0
+VM_QOS_BPS_BURST        := 0
 
 # ── Cloud image ─────────────────────────────────────────────────────────────
 CLOUD_IMAGE_URL  := https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
@@ -102,19 +119,23 @@ vms: microceph network
 test:
 	bash 04_test.sh
 
-snapshot:
-	bash 05_snapshot.sh create $(if $(VM),$(VM),all)
+vms2: 
+	bash 03_vm.sh
 
-snapshot-list:
-	bash 05_snapshot.sh list $(if $(VM),$(VM),all)
 
-snapshot-rollback:
-	@[[ -n "$(VM)" && -n "$(SNAP)" ]] || \
-		{ echo "Usage: make snapshot-rollback VM=<vm> SNAP=<snap-name>"; exit 1; }
-	bash 05_snapshot.sh rollback $(VM) $(SNAP)
+# snapshot:
+# 	bash 05_snapshot.sh create $(if $(VM),$(VM),all)
 
-snapshot-purge:
-	bash 05_snapshot.sh purge $(if $(VM),$(VM),all)
+# snapshot-list:
+# 	bash 05_snapshot.sh list $(if $(VM),$(VM),all)
+
+# snapshot-rollback:
+# 	@[[ -n "$(VM)" && -n "$(SNAP)" ]] || \
+# 		{ echo "Usage: make snapshot-rollback VM=<vm> SNAP=<snap-name>"; exit 1; }
+# 	bash 05_snapshot.sh rollback $(VM) $(SNAP)
+
+# snapshot-purge:
+# 	bash 05_snapshot.sh purge $(if $(VM),$(VM),all)
 
 clean:
 	bash cleanup.sh

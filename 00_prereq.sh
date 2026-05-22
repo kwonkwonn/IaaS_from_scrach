@@ -25,6 +25,7 @@ apt-get install -y \
     iproute2 \
     iptables \
     cloud-image-utils \
+    numactl \
     ovmf \
     wget \
     sshpass
