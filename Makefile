@@ -89,6 +89,12 @@ VM_QOS_WRITE_BPS_LIMIT  := 0
 VM_QOS_IOPS_BURST       := 0
 VM_QOS_BPS_BURST        := 0
 
+# ── UEFI ────────────────────────────────────────────────────────────────────
+# 0 = legacy BIOS  |  1 = UEFI (OVMF); per-VM VARS copy written to VM_PIDDIR
+VM_UEFI          := 0
+OVMF_CODE        := /usr/share/OVMF/OVMF_CODE_4M.fd
+OVMF_VARS        := /usr/share/OVMF/OVMF_VARS_4M.fd
+
 # ── Cloud image ─────────────────────────────────────────────────────────────
 CLOUD_IMAGE_URL  := https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
 CLOUD_IMAGE_FILE := /tmp/noble-cloudimg.img

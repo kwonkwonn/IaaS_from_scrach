@@ -42,6 +42,9 @@ VM_PIDDIR=${VM_PIDDIR:-/run/vms}
 VM_LOGDIR=${VM_LOGDIR:-/var/log/vms}
 CEPH_CONF=${CEPH_CONF:-/var/snap/microceph/current/conf/ceph.conf}
 CEPH_KEYRING=${CEPH_KEYRING:-/var/snap/microceph/current/conf/ceph.client.admin.keyring}
+VM_UEFI=${VM_UEFI:-0}
+OVMF_CODE=${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.fd}
+OVMF_VARS=${OVMF_VARS:-/usr/share/OVMF/OVMF_VARS_4M.fd}
 
 TMPL_DIR="$(dirname "$0")/templates"
 
@@ -149,25 +152,37 @@ launch_vm() {
     local seed="${CLOUD_INIT_DIR}/${name}/seed.iso"
     local vnc_display=$(( vnc_port - 5900 ))
 
+    local -a qemu_args=(
+        -enable-kvm
+        -m "$VM_RAM_MB"
+        -smp "$VM_CPUS"
+        -drive "$rbd_drive"
+        -drive "file=${seed},media=cdrom,readonly=on"
+        -netdev "tap,id=net0,ifname=${tap},script=no,downscript=no"
+        -device "virtio-net-pci,netdev=net0,mac=${mac}"
+        -vnc "127.0.0.1:${vnc_display}"
+        -serial "file:${VM_LOGDIR}/${name}-console.log"
+        -name "$name"
+        -daemonize
+        -pidfile "${VM_PIDDIR}/${name}.pid"
+    )
+
+    if [[ "${VM_UEFI}" -eq 1 ]]; then
+        local vars_file="${VM_PIDDIR}/${name}-uefi-vars.fd"
+        [[ ! -f "$vars_file" ]] && cp "$OVMF_VARS" "$vars_file"
+        qemu_args+=(
+            -drive "if=pflash,format=raw,readonly=on,file=${OVMF_CODE}"
+            -drive "if=pflash,format=raw,file=${vars_file}"
+        )
+    fi
+
     local -a launcher=(ip netns exec "$ns")
     if [[ "${VM_CPU_PIN}" -eq 1 && -n "$cpuset" ]]; then
         launcher=(taskset -c "$cpuset" ip netns exec "$ns")
         echo "[vm] $name: CPU pinned to $cpuset"
     fi
 
-    "${launcher[@]}" qemu-system-x86_64 \
-        -enable-kvm \
-        -m "$VM_RAM_MB" \
-        -smp "$VM_CPUS" \
-        -drive "$rbd_drive" \
-        -drive file="$seed",media=cdrom,readonly=on \
-        -netdev tap,id=net0,ifname="$tap",script=no,downscript=no \
-        -device virtio-net-pci,netdev=net0,mac="$mac" \
-        -vnc "127.0.0.1:${vnc_display}" \
-        -serial "file:${VM_LOGDIR}/${name}-console.log" \
-        -name "$name" \
-        -daemonize \
-        -pidfile "${VM_PIDDIR}/${name}.pid"
+    "${launcher[@]}" qemu-system-x86_64 "${qemu_args[@]}"
 
     echo "[vm] $name started — VNC 127.0.0.1:${vnc_port}  console: ${VM_LOGDIR}/${name}-console.log"
 }

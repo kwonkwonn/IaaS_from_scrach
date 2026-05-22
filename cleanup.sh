@@ -131,6 +131,7 @@ microceph.ceph osd pool delete "$CEPH_POOL" "$CEPH_POOL" \
 rm -rf "$CLOUD_INIT_DIR"
 rm -f  "$CLOUD_IMAGE_FILE"
 rm -f  "${VM_PIDDIR}"/*.disk 2>/dev/null || true
+rm -f  "${VM_PIDDIR}"/*-uefi-vars.fd 2>/dev/null || true
 rm -f  "${VM_LOGDIR}"/*.log  2>/dev/null || true
 
 echo "[cleanup] done"
