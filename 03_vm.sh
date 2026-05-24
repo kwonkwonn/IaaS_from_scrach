@@ -191,6 +191,8 @@ launch_vm() {
 # per-VM: seed ISO + launch
 # ----------------------------------------------------------------------------
 
+mkdir -p "$VM_PIDDIR" "$VM_LOGDIR" "$CLOUD_INIT_DIR"
+
 make_seed "$VM1_NAME" "$VM1_IP" "$VM1_MAC"
 make_seed "$VM2_NAME" "$VM2_IP" "$VM2_MAC"
 make_seed "$VM3_NAME" "$VM3_IP" "$VM3_MAC"

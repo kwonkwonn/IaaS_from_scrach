@@ -20,6 +20,22 @@ CLOUD_IMAGE_FILE=${CLOUD_IMAGE_FILE:-/tmp/noble-cloudimg.img}
 RBD="microceph.rbd"
 
 # ----------------------------------------------------------------------------
+# pool setup (idempotent)
+# ----------------------------------------------------------------------------
+
+if ! microceph.ceph osd pool ls 2>/dev/null | grep -q "^${CEPH_POOL}$"; then
+    microceph.ceph osd pool create "$CEPH_POOL" 32
+    $RBD pool init "$CEPH_POOL"
+    echo "[storage] pool '$CEPH_POOL' created"
+else
+    echo "[storage] pool '$CEPH_POOL' already exists — skipping"
+fi
+
+# single-node: no replication
+microceph.ceph osd pool set "$CEPH_POOL" size 1 --yes-i-really-mean-it
+microceph.ceph osd pool set "$CEPH_POOL" min_size 1
+
+# ----------------------------------------------------------------------------
 # functions
 # ----------------------------------------------------------------------------
 
@@ -33,11 +49,6 @@ install_image() {
     if $RBD snap ls "$img" 2>/dev/null | grep -qw "installed"; then
         echo "[storage] $img already has OS — skipping image write"
         return
-    fi
-
-    if [[ ! -f "$CLOUD_IMAGE_FILE" ]]; then
-        echo "[storage] cloud image not found — downloading ..."
-        wget --progress=dot:giga -O "$CLOUD_IMAGE_FILE" "$CLOUD_IMAGE_URL"
     fi
 
     $RBD rm "$img" &>/dev/null || true
@@ -57,6 +68,15 @@ install_image() {
 # ----------------------------------------------------------------------------
 
 mkdir -p "$VM_PIDDIR"
+
+# download cloud image once (before the per-VM loop)
+# NOTE: ~600 MB, takes a few minutes on first run
+if [[ ! -f "$CLOUD_IMAGE_FILE" ]]; then
+    echo "[storage] downloading cloud image (~600 MB) ..."
+    wget --progress=dot:giga -O "$CLOUD_IMAGE_FILE" "$CLOUD_IMAGE_URL"
+else
+    echo "[storage] cloud image already present — skipping download"
+fi
 
 for name in "$VM1_NAME" "$VM2_NAME" "$VM3_NAME"; do
     echo "${CEPH_POOL}/${name}" > "${VM_PIDDIR}/${name}.disk"

@@ -45,9 +45,10 @@ fi
 
 # ── microceph bootstrap (single-node) ────────────────────────────────────────
 
-CEPH_POOL=${CEPH_POOL:-vms}
 CEPH_CONF=${CEPH_CONF:-/var/snap/microceph/current/conf/ceph.conf}
-CEPH_KEYRING=${CEPH_KEYRING:-/var/snap/microceph/current/conf/ceph.client.admin.keyring}
+VM_PIDDIR=${VM_PIDDIR:-/run/vms}
+VM_LOGDIR=${VM_LOGDIR:-/var/log/vms}
+CLOUD_INIT_DIR=${CLOUD_INIT_DIR:-/tmp/cloud-init}
 
 if ! microceph.ceph --conf "$CEPH_CONF" status &>/dev/null; then
     microceph cluster bootstrap
@@ -77,20 +78,6 @@ else
     echo "[prereq] OSD already present — skipping"
 fi
 
-# ── Ceph pool ────────────────────────────────────────────────────────────────
-
-if ! microceph.ceph osd pool ls 2>/dev/null | grep -q "^${CEPH_POOL}$"; then
-    microceph.ceph osd pool create "$CEPH_POOL" 32
-    microceph.rbd pool init "$CEPH_POOL"
-    echo "[prereq] pool '$CEPH_POOL' created"
-else
-    echo "[prereq] pool '$CEPH_POOL' already exists — skipping"
-fi
-
-# single-node: no replication (data loss on OSD failure is acceptable in this lab)
-microceph.ceph osd pool set "$CEPH_POOL" size 1 --yes-i-really-mean-it
-microceph.ceph osd pool set "$CEPH_POOL" min_size 1
-
 # ── kernel modules ───────────────────────────────────────────────────────────
 
 # tun: required for QEMU TAP interfaces inside network namespaces
@@ -101,15 +88,5 @@ modprobe rbd
 # ── runtime directories ──────────────────────────────────────────────────────
 
 mkdir -p "$VM_PIDDIR" "$VM_LOGDIR" "$CLOUD_INIT_DIR"
-
-# ── cloud image ───────────────────────────────────────────────────────────────
-
-# NOTE: ~600 MB download, takes a few minutes
-if [[ ! -f "$CLOUD_IMAGE_FILE" ]]; then
-    echo "[prereq] downloading cloud image (~600 MB, takes a few minutes) ..."
-    wget --progress=dot:giga -O "$CLOUD_IMAGE_FILE" "$CLOUD_IMAGE_URL"
-else
-    echo "[prereq] cloud image already present — skipping"
-fi
 
 echo "[prereq] done"
